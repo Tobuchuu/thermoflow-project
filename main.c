@@ -5,51 +5,44 @@
 //https://github.com/melexis/mlx90640-library
 #include "MLX90640_API.h"
 #include "MLX90640_I2C_Driver.h"
-//LCD library
-#include "lcd.h"
-//Useful delay function
-#include "delay.h"
-//If math functions don't work such as sqrt() or absf()
-#include "math.h"
-
+#include "delay.h" //Useful delay function
+#include "math.h" //If math functions don't work such as sqrt() or absf()
 #include "pwm.h"
 
 #define OPENAIR_TA_SHIFT 8 ///< Default 8 degree offset from ambient air
 
-// uint16_t map_color_to_intensity(float min, float max, float value);
-void get_min_max_float(float* buffer, uint32_t size, float* ret_min, float* ret_max);
-int getMultiplier(int targetTmp, int currentTmp, int currentMode);
-int getHottestPixel(float tmpImage[]);
-int getServoAngle(float tmpImage[], float maxTmp, int aOrB);
-void switchMode(int *pMode);
+void get_min_max_float(float* buffer, uint32_t size, float* ret_min, float* ret_max);// Sets minimum and maximum temperature
+int getMultiplier(int targetTmp, int currentTmp, int currentMode);					// Outputs the % that the fan pwm will run at
+int getHottestPixel(float tmpImage[]);												// Finds the index of the hottest pixel
+int getServoAngle(float tmpImage[], float maxTmp, int aOrB);						// Uses the hottest pixel to calculate x and y coords for servo pwm
+void switchMode(int *pMode);														// Switches what array for getMultiplier() will use
 
 typedef struct{
 	int intervals[8];
 }State;
 
 int main(){
-	
 	float tr = 23.15; //Reflected temperature
 	int cyclecount = 0;
 	float emissivity = 0.95;
 
 	int multiplier = 0;
-	int tragetHeat = 36;
+	int runOnce = 1;
+	int tragetHeat = 33; // The temperature that the fan is aiming for, max temperature below it stops the fan.
 	uint32_t button;
 	int mode = 0;
 	int btnPress = 0;
 
+	//Parameters involving IR camera
 	paramsMLX90640 params;
 	uint16_t eeMLX90640[MLX90640_EEPROM_SIZE];
 	uint16_t mlx90640Frame[MLX90640_FRAME_SIZE];
 	float image[MLX90640_IMAGE_SIZE];
 	float min, max;
 
+	//Startup pins
 	rcu_periph_clock_enable(RCU_GPIOB);
 	gpio_init(GPIOB, GPIO_MODE_OUT_PP, GPIO_OSPEED_50MHZ, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2);
-	// Lcd_SetType(LCD_INVERTED);
-    // Lcd_Init();
-    // LCD_Clear(BLACK);
 
 	//Initialize I2C bus
 	MLX90640_I2CInit();
@@ -81,20 +74,22 @@ int main(){
 		
 		//Extract maximum and minimum temperature in image
 		get_min_max_float(image, (24*32)-1, &min, &max);
-		//Display minimum, maximum and ambient temperature
-		LCD_ShowNum1(0,0,max,5,WHITE);
-		LCD_ShowNum1(0,16,min,5,RED);
-		LCD_ShowNum1(0,32,tr+OPENAIR_TA_SHIFT,5,YELLOW);
+
+		if (runOnce == 1){
+			runOnce = 0;
+			MoveServoA(1500);
+			MoveServoB(1500);
+		}
+
+		delay_1ms(1000);
 
 		// Multiplier based on temperature difference
-		multiplier = getMultiplier(tragetHeat, max, mode);
-		//LCD_ShowNum1(0,48,multiplier,5,GRAY);
-      	FanPWMch0(160 * multiplier); // max: input is 16000,  ex: 160 * 100 = 16000
-
+		multiplier = getMultiplier(tragetHeat, max, mode);	
+		FanPWMch0(160 * multiplier); // max: input is 16000,  ex: 160 * 100 = 16000
 
 		// Get servo PWM based on hottest pixel position
-    	int servoA_angle = getServoAngle(image, max, 1);
-	    int servoB_angle = getServoAngle(image, max, 0);
+		int servoA_angle = getServoAngle(image, max, 1);
+		int servoB_angle = getServoAngle(image, max, 0);
 
 		// Move servo with PWM
 		MoveServoA(servoA_angle);
@@ -110,14 +105,6 @@ int main(){
 		} else {
 			btnPress = 0;
 		}
-		
-		// for(int y = 0; y < 24; y++){
-		// 	for(int x = 0; x < 32; x++){
-		// 		//Draw image to screen with color mapped to temperature in the current range
-		// 		uint16_t color = map_color_to_intensity(min, max, image[(y*32)+x]);
-		// 		LCD_DrawPoint_big((x*3)+(159-(32*3)), (y*3)+1, color);
-		// 	}
-		// }
 	}
 }
 
@@ -132,27 +119,11 @@ void get_min_max_float(float* buffer, uint32_t size, float* ret_min, float* ret_
 	}
 }
 
-// uint16_t map_color_to_intensity(float min, float max, float value){
-// 	float one_step = (max - min)/128.0;
-// 	float intensity = (value - min)/one_step;
-
-// 	int32_t red = intensity > 31.0 ? 31.0 : intensity;
-
-// 	int32_t green = (intensity - 32.0) > 63.0 ?  63.0 : (intensity - 32.0);
-// 	green = green < 0 ? 0 : green;
-
-// 	int32_t blue = (intensity - 96.0) > 63.0 ?  63.0 : (intensity - 96.0);
-// 	blue = blue < 0 ? 0 : blue;
-
-// 	return (blue) | (green << 5) | (red << 11);
-// }
-
-
 // ------------------- Fan Functions -------------------
 
 void switchMode(int *pMode){
 	*pMode++;
-	if (*pMode > 3){
+	if (*pMode >= 3){
 		*pMode = 0;
 	}
 }
@@ -193,55 +164,19 @@ int getServoAngle(float tmpImage[], float maxTmp, int aOrB){
 	if (tmpImage[16*12] < maxTmp){
 		int hottestPixelIndex = getHottestPixel(tmpImage);
 
-		// Hottest pixel's position in the image
+		// Hottest pixel position in the image
 		int hottestPixelX = hottestPixelIndex % 32;
 		int hottestPixelY = hottestPixelIndex / 32;
 
-		// Pixel's position relative to the center
-		// Display is 32x24 so center pixle position is (16, 12)
-		// int centerPixelX = 16;
-		// int centerPixelY = 12;
-
-		// Negative numbers are set to zero (could just be the displaying)??? 
-		// Temp fix with abs() but then I dont know if the pixle is above or below the center pixel
-		// int relativeX = hottestPixelX - centerPixelX;
-		// int relativeY = centerPixelY - hottestPixelY; // Y-axis is inverted in the image
-
-		// Print the hottest pixel's position
-		// Hottest pixel position
-		// LCD_ShowNum1(0,48,hottestPixelX,5,BLUE);
-		// LCD_ShowNum1(0,64,hottestPixelY,5,BLUE);
-
-		// Relative position to center
-		// LCD_ShowNum1(0,48,relativeX,5,GRAY);
-		// LCD_ShowNum1(0,64,relativeY,5,GRAY);
-		
-		// Modify to projects liking: 2000ms = 180 degrees, 1000ms = 0 degrees
-		int diffX[32] = {2000, 1990, 1950, 1930, 1900, 1890, 1850, 1830, 1800, 1790,
-						1750, 1650, 1600, 1550, 1500,  1490, 1450, 1400, 1390, 1350, 1300, 1290, 1250, 
-						1200, 1190, 1150, 1100, 1095, 1050, 1030, 1000};
+		// Preset values for the servo pwm, 2000 = 180 degrees and 1000 = 0 degrees
 		int diffY[24] = {2000, 1950, 1900, 1850, 1800, 1750, 1700, 1650, 1600, 1590, 1550, 
 						1500, 1490, 1450, 1400, 1390, 1350, 1300, 1250, 1200, 1150, 1100, 1050, 1000};
 
-		// Assumning the relative variables can be negative
-		// if(aOrB == 1){
-		// 	if (relativeX >= -15) {
-		// 		return diffX[0];
-		// 	} else if (hottestPixelX <= 15){
-		// 		return diffX[31];
-		// 	} else{
-		// 		return diffX[relativeX + 15];
-		// 	}
-		// } else{
-		// 	if (relativeY >= -11) {
-		// 		return diffY[0];
-		// 	} else if (relativeY <= 11){
-		// 		return diffY[23];
-		// 	} else{
-		// 		return diffY[relativeY + 11];
-		// 	}
-		// }
+		int diffX[32] = {1000, 1030, 1050, 1095, 1100, 1150, 1190, 1200, 1250, 1290,
+						1300, 1350, 1400, 1450, 1500,  1550, 1590, 1600, 1650, 1690, 1700, 1750, 1790, 
+						1800, 1850, 1890, 1900, 1930, 1950, 1990, 1000};
 
+		// Conditions on picking out the the pwm for respective servo
 		if(aOrB == 1){
 			if (hottestPixelX <= 0) {
 				return diffX[0];
@@ -261,6 +196,7 @@ int getServoAngle(float tmpImage[], float maxTmp, int aOrB){
 		}
 
 	} else {
+		// Center servo if the center pixel is the hottest spot
 		return 1500;
 	}
 }

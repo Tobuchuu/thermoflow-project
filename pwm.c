@@ -14,7 +14,7 @@ void InitPWM(){
     timer_initpara.prescaler         = 107;
     timer_initpara.alignedmode       = TIMER_COUNTER_EDGE;
     timer_initpara.counterdirection  = TIMER_COUNTER_UP;
-    timer_initpara.period            = 15999;
+    timer_initpara.period            = 15999;               // Value is probably wrong for the fan, there wasnt a datasheet for the first fan
     timer_initpara.clockdivision     = TIMER_CKDIV_DIV1;
     timer_initpara.repetitioncounter = 0;
     timer_init(TIMER1, &timer_initpara);

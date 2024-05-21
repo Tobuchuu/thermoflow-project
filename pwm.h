@@ -1,10 +1,10 @@
 #include "gd32vf103.h"
-void InitPWM(void);
+void InitPWM(void);         // Fan
 
-void InitServo(void);
+void InitServo(void);       // Servo
 
-void FanPWMch0(int value);
+void FanPWMch0(int value);  // Control fan
 
-void MoveServoA(int value);
+void MoveServoA(int value); // Control servo 1
 
-void MoveServoB(int value);
+void MoveServoB(int value); // Control servo 2
